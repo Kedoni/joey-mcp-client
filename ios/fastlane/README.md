@@ -31,6 +31,14 @@ Upload to App Store Connect via TestFlight / App Store
 
 Upload to TestFlight
 
+### ios submit_build_12
+
+```sh
+[bundle exec] fastlane ios submit_build_12
+```
+
+Submit already-uploaded App Store build 12
+
 ----
 
 This README.md is auto-generated and will be re-generated every time [_fastlane_](https://fastlane.tools) is run.

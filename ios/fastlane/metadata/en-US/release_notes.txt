@@ -1,4 +1,4 @@
-• Local device tools — Enable on-device tools per chat for time, location, contacts, messages, calls, email, calendar, reminders, device info, URLs, and alarms
-• Safer actions — SMS, calls, email, URLs, and alarms now show clear confirmation cards before opening another app
-• Improved MCP setup — Local tools are visually separate from remote MCP servers and show permission status in debug
-• Bug fixes — Improved local tool URI encoding, iOS keyboard behavior while streaming, and native permission handling
+• Bring your own API — Connect using any OpenAI-compatible API (base URL, optional bearer token, custom headers) as an alternative to OpenRouter
+• Local device tools — Toggle on-device tools per chat for time, location, contacts, messages, calls, email, calendar, reminders, device info, URLs, and alarms
+• Safer actions — SMS, calls, email, URLs, and alarms show clear confirmation cards before opening another app
+• Bug fixes — Improved provider handling, local tool URI encoding, and iOS keyboard behavior while streaming

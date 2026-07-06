@@ -49,6 +49,8 @@
 	<string>Joey needs calendar write access when you enable local calendar tools to create and edit events.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Joey needs access to your contacts when you enable local contact tools for a chat.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Joey only uses your location when you enable local location tools for a chat, so the assistant can answer with your current device location.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Joey needs access to your location when you enable local location tools for a chat.</string>
 	<key>NSMicrophoneUsageDescription</key>

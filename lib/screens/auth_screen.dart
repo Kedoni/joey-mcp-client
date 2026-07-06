@@ -4,6 +4,8 @@ import '../services/openrouter_service.dart';
 import '../utils/in_app_browser.dart';
 import '../utils/privacy_constants.dart';
 
+enum _AuthProviderChoice { openRouter, openAICompatible }
+
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
 
@@ -13,14 +15,27 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> {
   final OpenRouterService _openRouterService = OpenRouterService();
+  final TextEditingController _byoBaseUrlController = TextEditingController();
+  final TextEditingController _byoTokenController = TextEditingController();
+  final TextEditingController _byoHeadersController = TextEditingController();
   bool _isAuthenticating = false;
   bool _consentGiven = false;
   String? _errorMessage;
+  _AuthProviderChoice _providerChoice = _AuthProviderChoice.openRouter;
 
   @override
   void initState() {
     super.initState();
     _loadConsentState();
+    _loadProviderConfig();
+  }
+
+  @override
+  void dispose() {
+    _byoBaseUrlController.dispose();
+    _byoTokenController.dispose();
+    _byoHeadersController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadConsentState() async {
@@ -35,6 +50,26 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _saveConsentState() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('privacy_consent_given', true);
+  }
+
+  Future<void> _loadProviderConfig() async {
+    final isByo = await _openRouterService.isUsingOpenAICompatibleProvider();
+    final byoConfig = await _openRouterService
+        .getOpenAICompatibleConfigForDisplay();
+    if (!mounted) return;
+    setState(() {
+      _providerChoice = isByo
+          ? _AuthProviderChoice.openAICompatible
+          : _AuthProviderChoice.openRouter;
+      if (byoConfig != null) {
+        _byoBaseUrlController.text = byoConfig['baseUrl'] as String? ?? '';
+        _byoTokenController.text = byoConfig['bearerToken'] as String? ?? '';
+        final headers = (byoConfig['headers'] as Map<String, String>?) ?? {};
+        _byoHeadersController.text = headers.entries
+            .map((entry) => '${entry.key}: ${entry.value}')
+            .join('\n');
+      }
+    });
   }
 
   /// Handle OAuth callback with authorization code
@@ -95,8 +130,63 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+  Future<void> _saveOpenAICompatibleConfig() async {
+    setState(() {
+      _errorMessage = null;
+      _isAuthenticating = true;
+    });
+
+    try {
+      final models = await _openRouterService.validateOpenAICompatibleConfig(
+        baseUrl: _byoBaseUrlController.text.trim(),
+        bearerToken: _byoTokenController.text.trim(),
+        headers: _parseHeaders(_byoHeadersController.text),
+      );
+      if (models.isEmpty) {
+        throw Exception('No models were returned by this API.');
+      }
+      await _openRouterService.saveOpenAICompatibleConfig(
+        baseUrl: _byoBaseUrlController.text.trim(),
+        bearerToken: _byoTokenController.text.trim(),
+        headers: _parseHeaders(_byoHeadersController.text),
+      );
+      await _saveConsentState();
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/conversations');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Failed to validate API: ${e.toString()}';
+          _isAuthenticating = false;
+        });
+      }
+    }
+  }
+
+  Map<String, String> _parseHeaders(String text) {
+    final headers = <String, String>{};
+    for (final line in text.split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      final separator = trimmed.indexOf(':');
+      if (separator <= 0) {
+        throw FormatException('Invalid header line: $line');
+      }
+      final key = trimmed.substring(0, separator).trim();
+      final value = trimmed.substring(separator + 1).trim();
+      if (key.isNotEmpty && value.isNotEmpty) {
+        headers[key] = value;
+      }
+    }
+    return headers;
+  }
+
   void _openPrivacyPolicy() {
-    launchInAppBrowser(Uri.parse(PrivacyConstants.privacyPolicyUrl), context: context);
+    launchInAppBrowser(
+      Uri.parse(PrivacyConstants.privacyPolicyUrl),
+      context: context,
+    );
   }
 
   @override
@@ -125,13 +215,38 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Connect with OpenRouter to start chatting with AI models',
+                'Connect with OpenRouter or bring your own OpenAI-compatible API',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 32),
+
+              SegmentedButton<_AuthProviderChoice>(
+                segments: const [
+                  ButtonSegment(
+                    value: _AuthProviderChoice.openRouter,
+                    icon: Icon(Icons.cloud_outlined),
+                    label: Text('OpenRouter'),
+                  ),
+                  ButtonSegment(
+                    value: _AuthProviderChoice.openAICompatible,
+                    icon: Icon(Icons.dns_outlined),
+                    label: Text('OpenAI Compatible / BYO'),
+                  ),
+                ],
+                selected: {_providerChoice},
+                onSelectionChanged: _isAuthenticating
+                    ? null
+                    : (selection) {
+                        setState(() {
+                          _providerChoice = selection.first;
+                          _errorMessage = null;
+                        });
+                      },
+              ),
+              const SizedBox(height: 16),
 
               // Data sharing disclosure
               Container(
@@ -140,7 +255,9 @@ class _AuthScreenState extends State<AuthScreen> {
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outline.withValues(alpha: 0.5),
                   ),
                 ),
                 child: Column(
@@ -165,7 +282,9 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'By connecting, your conversation messages will be sent to OpenRouter for AI processing, and to any MCP servers you configure for tool execution. Your data is stored locally on your device and is not collected by Joey.',
+                      _providerChoice == _AuthProviderChoice.openAICompatible
+                          ? 'By connecting, your conversation messages will be sent to the OpenAI-compatible API endpoint you configure, and to any MCP servers you configure for tool execution. Your data is stored locally on your device and is not collected by Joey.'
+                          : 'By connecting, your conversation messages will be sent to OpenRouter for AI processing, and to any MCP servers you configure for tool execution. Your data is stored locally on your device and is not collected by Joey.',
                       style: TextStyle(
                         fontSize: 13,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -180,7 +299,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           fontSize: 13,
                           color: Theme.of(context).colorScheme.primary,
                           decoration: TextDecoration.underline,
-                          decorationColor: Theme.of(context).colorScheme.primary,
+                          decorationColor: Theme.of(
+                            context,
+                          ).colorScheme.primary,
                         ),
                       ),
                     ),
@@ -227,6 +348,43 @@ class _AuthScreenState extends State<AuthScreen> {
               ),
               const SizedBox(height: 24),
 
+              if (_providerChoice == _AuthProviderChoice.openAICompatible) ...[
+                TextField(
+                  controller: _byoBaseUrlController,
+                  enabled: !_isAuthenticating,
+                  decoration: const InputDecoration(
+                    labelText: 'Base URL',
+                    hintText: 'https://api.openai.com/v1',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.url,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _byoTokenController,
+                  enabled: !_isAuthenticating,
+                  decoration: const InputDecoration(
+                    labelText: 'Bearer token (optional)',
+                    hintText: 'sk-...',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _byoHeadersController,
+                  enabled: !_isAuthenticating,
+                  decoration: const InputDecoration(
+                    labelText: 'Custom headers (optional)',
+                    hintText: 'X-API-Key: value\nX-Custom: value',
+                    border: OutlineInputBorder(),
+                  ),
+                  minLines: 2,
+                  maxLines: 4,
+                ),
+                const SizedBox(height: 24),
+              ],
+
               // Error message
               if (_errorMessage != null) ...[
                 Container(
@@ -254,7 +412,11 @@ class _AuthScreenState extends State<AuthScreen> {
 
               // Connect button
               FilledButton.icon(
-                onPressed: (_isAuthenticating || !_consentGiven) ? null : _startAuth,
+                onPressed: (_isAuthenticating || !_consentGiven)
+                    ? null
+                    : _providerChoice == _AuthProviderChoice.openRouter
+                    ? _startAuth
+                    : _saveOpenAICompatibleConfig,
                 icon: _isAuthenticating
                     ? const SizedBox(
                         width: 20,
@@ -269,8 +431,12 @@ class _AuthScreenState extends State<AuthScreen> {
                     : const Icon(Icons.login),
                 label: Text(
                   _isAuthenticating
-                      ? 'Connecting...'
-                      : 'Connect with OpenRouter',
+                      ? _providerChoice == _AuthProviderChoice.openAICompatible
+                            ? 'Validating...'
+                            : 'Connecting...'
+                      : _providerChoice == _AuthProviderChoice.openRouter
+                      ? 'Connect with OpenRouter'
+                      : 'Validate & Save API',
                 ),
                 style: FilledButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 16),
@@ -305,7 +471,9 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'What is OpenRouter?',
+                          _providerChoice == _AuthProviderChoice.openRouter
+                              ? 'What is OpenRouter?'
+                              : 'Bring your own API',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: Theme.of(
@@ -317,7 +485,9 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'OpenRouter provides access to multiple AI models through a single API. You\'ll be redirected to their website to authorize this app.',
+                      _providerChoice == _AuthProviderChoice.openRouter
+                          ? 'OpenRouter provides access to multiple AI models through a single API. You\'ll be redirected to their website to authorize this app.'
+                          : 'Use any API that implements OpenAI-compatible /models and /chat/completions endpoints. Joey validates the /models endpoint before saving.',
                       style: TextStyle(
                         fontSize: 13,
                         color: Theme.of(context).colorScheme.onPrimaryContainer,

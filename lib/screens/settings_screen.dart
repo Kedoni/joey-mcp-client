@@ -11,6 +11,7 @@ import '../services/default_model_service.dart';
 import '../services/conversation_import_export_service.dart';
 import '../utils/in_app_browser.dart';
 import '../utils/privacy_constants.dart';
+import 'auth_screen.dart';
 import 'model_picker_screen.dart';
 import 'mcp_servers_screen.dart';
 
@@ -28,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoTitleEnabled = true;
   String _systemPrompt = '';
   int _maxToolCalls = 10;
+  String _providerName = 'OpenRouter';
 
   @override
   void initState() {
@@ -37,14 +39,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
+    final openRouterService = context.read<OpenRouterService>();
     final autoTitleEnabled = await DefaultModelService.getAutoTitleEnabled();
     final systemPrompt = await DefaultModelService.getSystemPrompt();
     final maxToolCalls = await DefaultModelService.getMaxToolCalls();
+    final providerName = await openRouterService.getProviderDisplayName();
     if (mounted) {
       setState(() {
         _autoTitleEnabled = autoTitleEnabled;
         _maxToolCalls = maxToolCalls;
         _systemPrompt = systemPrompt;
+        _providerName = providerName;
       });
     }
   }
@@ -97,7 +102,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _changeDefaultModel() async {
     final selectedModel = await Navigator.push<String>(
       context,
-      MaterialPageRoute(builder: (context) => const ModelPickerScreen(showDefaultToggle: false)),
+      MaterialPageRoute(
+        builder: (context) => const ModelPickerScreen(showDefaultToggle: false),
+      ),
     );
 
     if (selectedModel != null) {
@@ -242,13 +249,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
 
           // Account Section
-          _buildSectionHeader('Account'),
+          _buildSectionHeader('AI Provider'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ListTile(
+              leading: const Icon(Icons.settings_applications),
+              title: Text('Provider: $_providerName'),
+              subtitle: const Text(
+                'Change OpenRouter or BYO OpenAI-compatible API details',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AuthScreen()),
+              ),
+            ),
+          ),
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: ListTile(
               leading: const Icon(Icons.logout, color: Colors.orange),
-              title: const Text('Disconnect OpenRouter'),
-              subtitle: const Text('You\'ll need to reconnect to use the app'),
+              title: Text('Forget $_providerName Credentials'),
+              subtitle: const Text(
+                'Removes saved login/API details from this device',
+              ),
               onTap: () => _showLogoutDialog(),
             ),
           ),
@@ -340,9 +364,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
 
       final jsonString =
-          await ConversationImportExportService.exportAllConversations(provider);
+          await ConversationImportExportService.exportAllConversations(
+            provider,
+          );
 
-      final isDesktop = !kIsWeb &&
+      final isDesktop =
+          !kIsWeb &&
           (Platform.isMacOS || Platform.isWindows || Platform.isLinux);
 
       if (isDesktop) {
@@ -366,8 +393,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       } else {
         final tempDir = await getTemporaryDirectory();
-        final tempFile =
-            File('${tempDir.path}/joey-conversations-export.json');
+        final tempFile = File('${tempDir.path}/joey-conversations-export.json');
         await tempFile.writeAsString(jsonString);
         await SharePlus.instance.share(
           ShareParams(files: [XFile(tempFile.path)]),
@@ -404,9 +430,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       final importResult =
           await ConversationImportExportService.importConversations(
-        jsonString,
-        provider,
-      );
+            jsonString,
+            provider,
+          );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -435,9 +461,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Disconnect OpenRouter'),
-        content: const Text(
-          'Are you sure you want to disconnect? You\'ll need to reconnect to OpenRouter to continue using the app.',
+        title: Text('Forget $_providerName Credentials'),
+        content: Text(
+          'Are you sure you want to remove saved provider credentials from this device? This does not delete any third-party account; it only disconnects Joey locally.',
         ),
         actions: [
           TextButton(
@@ -454,7 +480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               }
             },
             style: TextButton.styleFrom(foregroundColor: Colors.orange),
-            child: const Text('Disconnect'),
+            child: const Text('Forget Credentials'),
           ),
         ],
       ),

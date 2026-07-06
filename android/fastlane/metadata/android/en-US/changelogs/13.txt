@@ -1,0 +1,4 @@
+• Bring your own API — Connect using any OpenAI-compatible API (base URL, optional bearer token, custom headers) as an alternative to OpenRouter
+• Local device tools — Toggle on-device tools per chat for time, location, contacts, messages, calls, email, calendar, reminders, and more
+• Safer actions — SMS, calls, email, URLs, and alarms show clear confirmation cards
+• Bug fixes — Improved provider handling, URI encoding, and iOS keyboard behavior

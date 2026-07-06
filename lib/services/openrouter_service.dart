@@ -63,6 +63,12 @@ class OpenRouterRateLimitException implements Exception {
 
 class OpenRouterService {
   static const String _apiKeyKey = 'openrouter_api_key';
+  static const String _providerTypeKey = 'ai_provider_type';
+  static const String _byoBaseUrlKey = 'byo_openai_base_url';
+  static const String _byoTokenKey = 'byo_openai_token';
+  static const String _byoHeadersKey = 'byo_openai_headers';
+  static const String _providerOpenRouter = 'openrouter';
+  static const String _providerOpenAICompatible = 'openai_compatible';
   static const String _authUrl = 'https://openrouter.ai/auth';
   static const String _keysUrl = 'https://openrouter.ai/api/v1/auth/keys';
   static const String _callbackUrl =
@@ -74,8 +80,34 @@ class OpenRouterService {
   /// Check if user is authenticated
   Future<bool> isAuthenticated() async {
     final prefs = await SharedPreferences.getInstance();
+    final provider = prefs.getString(_providerTypeKey) ?? _providerOpenRouter;
+    if (provider == _providerOpenAICompatible) {
+      final baseUrl = prefs.getString(_byoBaseUrlKey);
+      return baseUrl != null && baseUrl.trim().isNotEmpty;
+    }
     final apiKey = prefs.getString(_apiKeyKey);
     return apiKey != null && apiKey.isNotEmpty;
+  }
+
+  Future<bool> isUsingOpenAICompatibleProvider() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_providerTypeKey) == _providerOpenAICompatible;
+  }
+
+  Future<String> getProviderDisplayName() async {
+    return await isUsingOpenAICompatibleProvider()
+        ? 'OpenAI Compatible API'
+        : 'OpenRouter';
+  }
+
+  Future<Map<String, dynamic>?> getOpenAICompatibleConfigForDisplay() async {
+    if (!await isUsingOpenAICompatibleProvider()) return null;
+    final config = await _getOpenAICompatibleConfig();
+    return {
+      'baseUrl': config.baseUrl,
+      'bearerToken': config.bearerToken,
+      'headers': config.headers,
+    };
   }
 
   /// Get the stored API key
@@ -88,6 +120,56 @@ class OpenRouterService {
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_apiKeyKey);
+    await prefs.remove(_providerTypeKey);
+    await prefs.remove(_byoBaseUrlKey);
+    await prefs.remove(_byoTokenKey);
+    await prefs.remove(_byoHeadersKey);
+  }
+
+  Future<void> saveOpenAICompatibleConfig({
+    required String baseUrl,
+    String? bearerToken,
+    Map<String, String>? headers,
+  }) async {
+    final normalizedBaseUrl = _normalizeBaseUrl(baseUrl);
+    await validateOpenAICompatibleConfig(
+      baseUrl: normalizedBaseUrl,
+      bearerToken: bearerToken,
+      headers: headers,
+    );
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_providerTypeKey, _providerOpenAICompatible);
+    await prefs.setString(_byoBaseUrlKey, normalizedBaseUrl);
+    if (bearerToken != null && bearerToken.trim().isNotEmpty) {
+      await prefs.setString(_byoTokenKey, bearerToken.trim());
+    } else {
+      await prefs.remove(_byoTokenKey);
+    }
+    if (headers != null && headers.isNotEmpty) {
+      await prefs.setString(_byoHeadersKey, jsonEncode(headers));
+    } else {
+      await prefs.remove(_byoHeadersKey);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> validateOpenAICompatibleConfig({
+    required String baseUrl,
+    String? bearerToken,
+    Map<String, String>? headers,
+  }) async {
+    final normalizedBaseUrl = _normalizeBaseUrl(baseUrl);
+    final response = await _dio.get(
+      _endpointUrl(normalizedBaseUrl, 'models'),
+      options: Options(
+        headers: _providerHeaders(
+          provider: _providerOpenAICompatible,
+          bearerToken: bearerToken,
+          customHeaders: headers,
+        ),
+      ),
+    );
+    return _parseModelsResponse(response.data);
   }
 
   /// Generate a random code verifier (43-128 characters)
@@ -154,6 +236,7 @@ class OpenRouterService {
         // Store the API key
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_apiKeyKey, key);
+        await prefs.setString(_providerTypeKey, _providerOpenRouter);
 
         // Clear the code verifier
         _codeVerifier = null;
@@ -187,7 +270,11 @@ class OpenRouterService {
     int? maxTokens,
   }) async {
     final apiKey = await getApiKey();
-    if (apiKey == null) {
+    final provider = await _getProviderType();
+    final byoConfig = provider == _providerOpenAICompatible
+        ? await _getOpenAICompatibleConfig()
+        : null;
+    if (provider == _providerOpenRouter && apiKey == null) {
       throw Exception('Not authenticated. Please log in first.');
     }
 
@@ -215,16 +302,15 @@ class OpenRouterService {
       );
 
       final response = await _dio.post(
-        'https://openrouter.ai/api/v1/chat/completions',
+        _chatCompletionsUrl(provider, byoConfig?.baseUrl),
         data: requestData,
         options: Options(
-          headers: {
-            'Authorization': 'Bearer $apiKey',
-            'Content-Type': 'application/json',
-            'HTTP-Referer':
-                'https://github.com/benkaiser/joey-mcp-client-flutter',
-            'X-Title': 'Joey MCP Client',
-          },
+          headers: _providerHeaders(
+            provider: provider,
+            apiKey: apiKey,
+            bearerToken: byoConfig?.bearerToken,
+            customHeaders: byoConfig?.headers,
+          ),
         ),
       );
 
@@ -284,7 +370,11 @@ class OpenRouterService {
     CancelToken? cancelToken,
   }) async* {
     final apiKey = await getApiKey();
-    if (apiKey == null) {
+    final provider = await _getProviderType();
+    final byoConfig = provider == _providerOpenAICompatible
+        ? await _getOpenAICompatibleConfig()
+        : null;
+    if (provider == _providerOpenRouter && apiKey == null) {
       throw Exception('Not authenticated. Please log in first.');
     }
 
@@ -304,16 +394,15 @@ class OpenRouterService {
       );
 
       final response = await _dio.post<ResponseBody>(
-        'https://openrouter.ai/api/v1/chat/completions',
+        _chatCompletionsUrl(provider, byoConfig?.baseUrl),
         data: requestData,
         options: Options(
-          headers: {
-            'Authorization': 'Bearer $apiKey',
-            'Content-Type': 'application/json',
-            'HTTP-Referer':
-                'https://github.com/benkaiser/joey-mcp-client-flutter',
-            'X-Title': 'Joey MCP Client',
-          },
+          headers: _providerHeaders(
+            provider: provider,
+            apiKey: apiKey,
+            bearerToken: byoConfig?.bearerToken,
+            customHeaders: byoConfig?.headers,
+          ),
           responseType: ResponseType.stream,
         ),
         cancelToken: cancelToken,
@@ -563,19 +652,29 @@ class OpenRouterService {
   /// Fetch available models from OpenRouter
   Future<List<Map<String, dynamic>>> getModels() async {
     final apiKey = await getApiKey();
-    if (apiKey == null) {
+    final provider = await _getProviderType();
+    final byoConfig = provider == _providerOpenAICompatible
+        ? await _getOpenAICompatibleConfig()
+        : null;
+    if (provider == _providerOpenRouter && apiKey == null) {
       throw Exception('Not authenticated. Please log in first.');
     }
 
     try {
       final response = await _dio.get(
-        'https://openrouter.ai/api/v1/models',
-        options: Options(headers: {'Authorization': 'Bearer $apiKey'}),
+        _modelsUrl(provider, byoConfig?.baseUrl),
+        options: Options(
+          headers: _providerHeaders(
+            provider: provider,
+            apiKey: apiKey,
+            bearerToken: byoConfig?.bearerToken,
+            customHeaders: byoConfig?.headers,
+          ),
+        ),
       );
 
       if (response.statusCode == 200 && response.data != null) {
-        final data = response.data['data'] as List<dynamic>;
-        return data.cast<Map<String, dynamic>>();
+        return _parseModelsResponse(response.data);
       } else {
         print(
           'OpenRouter: getModels failed with status ${response.statusCode}: ${response.data}',
@@ -601,4 +700,114 @@ class OpenRouterService {
       throw Exception('Error fetching models: $e');
     }
   }
+
+  Future<String> _getProviderType() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_providerTypeKey) ?? _providerOpenRouter;
+  }
+
+  Future<_OpenAICompatibleConfig> _getOpenAICompatibleConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    final baseUrl = prefs.getString(_byoBaseUrlKey);
+    if (baseUrl == null || baseUrl.trim().isEmpty) {
+      throw Exception('OpenAI-compatible API is not configured.');
+    }
+    final headersJson = prefs.getString(_byoHeadersKey);
+    Map<String, String> headers = {};
+    if (headersJson != null && headersJson.isNotEmpty) {
+      final decoded = jsonDecode(headersJson) as Map<String, dynamic>;
+      headers = decoded.map((key, value) => MapEntry(key, value.toString()));
+    }
+    return _OpenAICompatibleConfig(
+      baseUrl: baseUrl,
+      bearerToken: prefs.getString(_byoTokenKey),
+      headers: headers,
+    );
+  }
+
+  String _normalizeBaseUrl(String baseUrl) {
+    final trimmed = baseUrl.trim();
+    if (trimmed.isEmpty) {
+      throw Exception('Base URL is required.');
+    }
+    final uri = Uri.parse(trimmed);
+    if (!uri.hasScheme || !uri.hasAuthority) {
+      throw Exception('Base URL must include a scheme and host.');
+    }
+    return trimmed.replaceAll(RegExp(r'/+$'), '');
+  }
+
+  String _endpointUrl(String baseUrl, String endpoint) {
+    return '${_normalizeBaseUrl(baseUrl)}/$endpoint';
+  }
+
+  String _chatCompletionsUrl(String provider, String? baseUrl) {
+    if (provider == _providerOpenAICompatible) {
+      return _endpointUrl(baseUrl!, 'chat/completions');
+    }
+    return 'https://openrouter.ai/api/v1/chat/completions';
+  }
+
+  String _modelsUrl(String provider, String? baseUrl) {
+    if (provider == _providerOpenAICompatible) {
+      return _endpointUrl(baseUrl!, 'models');
+    }
+    return 'https://openrouter.ai/api/v1/models';
+  }
+
+  Map<String, String> _providerHeaders({
+    required String provider,
+    String? apiKey,
+    String? bearerToken,
+    Map<String, String>? customHeaders,
+  }) {
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    if (provider == _providerOpenAICompatible) {
+      if (bearerToken != null && bearerToken.trim().isNotEmpty) {
+        headers['Authorization'] = 'Bearer ${bearerToken.trim()}';
+      }
+      headers.addAll(customHeaders ?? {});
+    } else {
+      if (apiKey != null) {
+        headers['Authorization'] = 'Bearer $apiKey';
+      }
+      headers['HTTP-Referer'] =
+          'https://github.com/benkaiser/joey-mcp-client-flutter';
+      headers['X-Title'] = 'Joey MCP Client';
+    }
+    return headers;
+  }
+
+  List<Map<String, dynamic>> _parseModelsResponse(dynamic responseData) {
+    if (responseData is! Map || responseData['data'] is! List) {
+      throw Exception('Invalid models response: expected data array.');
+    }
+    final data = responseData['data'] as List<dynamic>;
+    return data.map((raw) {
+      final model = Map<String, dynamic>.from(raw as Map);
+      final id = model['id']?.toString() ?? model['name']?.toString();
+      if (id == null || id.isEmpty) {
+        throw Exception('Invalid model entry: missing id.');
+      }
+      model['id'] = id;
+      model['name'] ??= id;
+      model['architecture'] ??= {
+        'input_modalities': ['text'],
+        'output_modalities': ['text'],
+      };
+      return model;
+    }).toList();
+  }
+}
+
+class _OpenAICompatibleConfig {
+  final String baseUrl;
+  final String? bearerToken;
+  final Map<String, String> headers;
+
+  _OpenAICompatibleConfig({
+    required this.baseUrl,
+    required this.bearerToken,
+    required this.headers,
+  });
 }
