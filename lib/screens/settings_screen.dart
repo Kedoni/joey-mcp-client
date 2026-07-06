@@ -30,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _systemPrompt = '';
   int _maxToolCalls = 10;
   String _providerName = 'OpenRouter';
+  bool _isOpenRouterProvider = true;
 
   @override
   void initState() {
@@ -44,12 +45,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final systemPrompt = await DefaultModelService.getSystemPrompt();
     final maxToolCalls = await DefaultModelService.getMaxToolCalls();
     final providerName = await openRouterService.getProviderDisplayName();
+    final isByo = await openRouterService.isUsingOpenAICompatibleProvider();
     if (mounted) {
       setState(() {
         _autoTitleEnabled = autoTitleEnabled;
         _maxToolCalls = maxToolCalls;
         _systemPrompt = systemPrompt;
         _providerName = providerName;
+        _isOpenRouterProvider = !isByo;
       });
     }
   }
@@ -276,6 +279,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: () => _showLogoutDialog(),
             ),
           ),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ListTile(
+              enabled: _isOpenRouterProvider,
+              leading: Icon(
+                Icons.delete_forever,
+                color: _isOpenRouterProvider
+                    ? Colors.red
+                    : Theme.of(context).disabledColor,
+              ),
+              title: const Text('Delete OpenRouter Account'),
+              subtitle: Text(
+                _isOpenRouterProvider
+                    ? 'How to delete your account on OpenRouter'
+                    : 'Only available when connected to OpenRouter',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _isOpenRouterProvider
+                  ? () => _showDeleteOpenRouterAccountDialog()
+                  : null,
+            ),
+          ),
 
           const SizedBox(height: 16),
 
@@ -454,6 +479,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       }
     }
+  }
+
+  void _showDeleteOpenRouterAccountDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete OpenRouter Account'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Joey is a client for OpenRouter and cannot delete your OpenRouter '
+              'account for you. You can delete it directly on OpenRouter:',
+            ),
+            const SizedBox(height: 12),
+            const Text('1. Open OpenRouter Settings (link below).'),
+            const Text('2. Click "Manage Account".'),
+            const Text(
+              '3. In the modal that opens, select the "Security" tab.',
+            ),
+            const Text('4. Choose the option to delete your account.'),
+            const SizedBox(height: 12),
+            const Text(
+              'To remove OpenRouter credentials from this device only, use '
+              '"Forget OpenRouter Credentials" above.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              launchInAppBrowser(
+                Uri.parse('https://openrouter.ai/settings/preferences'),
+                context: context,
+              );
+            },
+            icon: const Icon(Icons.open_in_new),
+            label: const Text('Open OpenRouter Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showLogoutDialog() {

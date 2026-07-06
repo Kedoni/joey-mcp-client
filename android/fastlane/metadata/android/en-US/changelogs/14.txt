@@ -1,4 +1,4 @@
 • Bring your own API — Connect using any OpenAI-compatible API (base URL, optional bearer token, custom headers) as an alternative to OpenRouter
 • Account controls — Forget stored provider credentials on-device, plus guidance and a link to delete your OpenRouter account
 • Local device tools — Toggle on-device tools per chat for time, location, contacts, messages, calls, email, calendar, reminders, and more
-• Bug fixes — Improved provider handling, local tool URI encoding, and iOS keyboard behavior while streaming
+• Bug fixes — Improved provider handling, URI encoding, and iOS keyboard behavior
