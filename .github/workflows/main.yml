@@ -8,12 +8,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Устанавливаем Java (Gradle 8+ требует Java 17+)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # Устанавливаем Android SDK (нужно для сборки)
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      # Создаём local.properties, чтобы избежать ошибки с null
+      - name: Create local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+
+      # Устанавливаем Flutter (последняя стабильная версия)
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
+
       - run: flutter pub get
-      - run: flutter build apk --debug   # можно оставить --debug, чтобы не заморачиваться с подписью
+
+      # Сборка APK (отладочная версия без ключа)
+      - run: flutter build apk --debug --stacktrace   # --stacktrace покажет детали, если вдруг снова упадёт
+
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug
