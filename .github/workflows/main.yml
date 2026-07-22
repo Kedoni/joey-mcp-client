@@ -10,10 +10,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable'   # заменил 3.10.7 на stable
+          flutter-version: '3.27.4'
+          channel: 'stable'
           cache: true
       - run: flutter pub get
-      - run: flutter build apk --debug   # или --release, но для --release нужен ключ
+      - run: flutter build apk --debug   # можно оставить --debug, чтобы не заморачиваться с подписью
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug
